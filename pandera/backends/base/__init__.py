@@ -165,3 +165,46 @@ class BaseCheckBackend(ABC):
     def strategy(self):
         """Return a data generation strategy."""
         raise NotImplementedError
+
+
+class BaseParseBackend(ABC):
+    """Abstract base class for a check backend implementation."""
+
+    def __init__(self, check):  # pylint: disable=unused-argument
+        """Initializes a check backend object."""
+        ...
+
+    def __call__(self, check_obj, key=None):
+        raise NotImplementedError
+
+    def query(self, check_obj):
+        """Implements querying behavior to produce subset of check object."""
+        raise NotImplementedError
+
+    def groupby(self, check_obj):
+        """Implements groupby behavior for check object."""
+        raise NotImplementedError
+
+    def aggregate(self, check_obj):
+        """Implements aggregation behavior for check object."""
+        raise NotImplementedError
+
+    def preprocess(self, check_obj, key):
+        """Preprocesses a check object before applying the check function."""
+        raise NotImplementedError
+
+    def postprocess(self, check_obj, check_output):
+        """Postprocesses the result of applying the check function."""
+        raise NotImplementedError
+
+    def apply(self, check_obj):
+        """Apply the check function to a check object."""
+        raise NotImplementedError
+
+    def statistics(self):
+        """Check statistics property."""
+        raise NotImplementedError
+
+    def strategy(self):
+        """Return a data generation strategy."""
+        raise NotImplementedError

@@ -16,6 +16,7 @@ from typing import (
 from pandera.api.base.model_components import (
     BaseCheckInfo,
     BaseFieldInfo,
+    BasicParseInfo,
     CheckArg,
     to_checklist,
 )
@@ -30,6 +31,8 @@ SchemaComponent = TypeVar("SchemaComponent", bound=ArraySchema)
 
 CHECK_KEY = "__check_config__"
 DATAFRAME_CHECK_KEY = "__dataframe_check_config__"
+
+PARSE_KEY = "__parse_config__"
 
 
 class FieldInfo(BaseFieldInfo):
@@ -237,6 +240,23 @@ class FieldCheckInfo(CheckInfo):  # pylint:disable=too-few-public-methods
         self.regex = regex
 
 
+class ParseInfo(BasicParseInfo):
+    """Captures extra information about a Parse."""
+
+    ...
+
+
+class FieldParseInfo(ParseInfo):
+    """Captures extra information about a Parse assigned to a field."""
+
+    def __init__(
+        self, fields: Set[Union[str, FieldInfo]], parse_fn: AnyCallable, regex: bool = False, **parse_kwargs: Any
+    ) -> None:
+        super().__init__(parse_fn, **parse_kwargs)
+        self.fields = fields
+        self.regex = regex
+
+
 def _to_function_and_classmethod(
     fn: Union[AnyCallable, classmethod]
 ) -> Tuple[AnyCallable, classmethod]:
@@ -303,4 +323,29 @@ def dataframe_check(_fn=None, **check_kwargs) -> ClassCheck:
 
     if _fn:
         return _wrapper(_fn)  # type: ignore
+    return _wrapper
+
+
+ClassParse = Callable[[Union[classmethod, AnyCallable]], classmethod]
+
+
+def parse(*fields, regex: bool = False, **parse_kwargs) -> ClassParse:
+    """Decorator to make DataFrameModel method a column/index parse function.
+
+    *new in PyZS*
+
+    This indicates that the decorated method should be used to parse a field
+    (column or index). The method will be converted to a classmethod. Therefore
+    its signature must start with `cls` followed by regular parse arguments.
+
+    :param _fn: Method to decorate.
+    :param parse_kwargs: Keywords arguments forwarded to Parse.
+    """
+
+    def _wrapper(fn: Union[classmethod, AnyCallable]) -> classmethod:
+        parse_fn, parse_method = _to_function_and_classmethod(fn)
+        parse_kwargs.setdefault("description", fn.__doc__)
+        setattr(parse_method, PARSE_KEY, FieldParseInfo(set(fields), parse_fn, regex, **parse_kwargs))
+        return parse_method
+
     return _wrapper

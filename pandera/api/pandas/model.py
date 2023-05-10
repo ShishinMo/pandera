@@ -22,6 +22,7 @@ from typing import (
 )
 
 import pandas as pd
+from pandera.api.parses import Parse
 
 from pandera.strategies import pandas_strategies as st
 from pandera.api.base.model import BaseModel
@@ -31,10 +32,13 @@ from pandera.api.pandas.container import DataFrameSchema
 from pandera.api.pandas.model_components import (
     CHECK_KEY,
     DATAFRAME_CHECK_KEY,
+    PARSE_KEY,
     CheckInfo,
     Field,
     FieldCheckInfo,
     FieldInfo,
+    FieldParseInfo,
+    ParseInfo,
 )
 from pandera.api.pandas.model_config import BaseConfig
 from pandera.errors import SchemaInitError
@@ -146,6 +150,7 @@ class DataFrameModel(BaseModel):
     #: Key according to `FieldInfo.name`
     __fields__: Mapping[str, Tuple[AnnotationInfo, FieldInfo]] = {}
     __checks__: Dict[str, List[Check]] = {}
+    __parses__: Dict[str, List[ParseInfo]] = {}
     __root_checks__: List[Check] = []
 
     @docstring_substitution(validate_doc=DataFrameSchema.validate.__doc__)
@@ -304,6 +309,52 @@ class DataFrameModel(BaseModel):
             cls.to_schema().validate(
                 check_obj, head, tail, sample, random_state, lazy, inplace
             ),
+        )
+        
+    @classmethod
+    def parse(
+        cls: Type[TDataFrameModel], parse_obj: pd.DataFrame, inplace: bool = False
+    ) -> pd.DataFrame:
+        if inplace:
+            df = parse_obj
+        else:
+            df = parse_obj.copy()
+
+        cls.__fields__ = cls._collect_fields()
+        for field, (annot_info, _) in cls.__fields__.items():
+            if isinstance(annot_info.arg, TypeVar):
+                raise SchemaInitError(f"Field {field} has a generic data type")
+
+        parse_infos = cast(List[FieldParseInfo], cls._collect_parse_infos(PARSE_KEY))
+
+        cls.__parses__ = cls._extract_parses(parse_infos, field_names=list(cls.__fields__.keys()))
+
+        for field, parses in cls.__parses__.items():
+            for parse in parses:
+                df[field] = parse._parse_fn(df[field])
+
+        return cast(DataFrameBase[TDataFrameModel], df)
+    
+    @classmethod
+    def parse_and_validate(
+        cls: Type[TDataFrameModel],
+        obj: pd.DataFrame,
+        head: Optional[int] = None,
+        tail: Optional[int] = None,
+        sample: Optional[int] = None,
+        random_state: Optional[int] = None,
+        lazy: bool = False,
+        inplace: bool = False,
+    ) -> DataFrameBase[TDataFrameModel]:
+        if inplace:
+            df = obj
+        else:
+            df = obj.copy()
+
+        df = cls.parse(parse_obj=df, inplace=inplace)
+        return cast(
+            DataFrameBase[TDataFrameModel],
+            cls.to_schema().validate(df, head, tail, sample, random_state, lazy, inplace),
         )
 
     @classmethod
@@ -559,6 +610,45 @@ class DataFrameModel(BaseModel):
     def __modify_schema__(cls, field_schema):
         """Update pydantic field schema."""
         field_schema.update(_to_json_schema(cls.to_schema()))
+
+    @classmethod
+    def _collect_parse_infos(cls, key: str) -> List[ParseInfo]:
+        bases = inspect.getmro(cls)[:-2]  # bases -> DataFrameModel -> object
+        bases = tuple(base for base in bases if issubclass(base, DataFrameModel))
+
+        method_names = set()
+        parse_infos = []
+        for base in bases:
+            for attr_name, attr_value in vars(base).items():
+                parse_info = getattr(attr_value, key, None)
+                if not isinstance(parse_info, ParseInfo):
+                    continue
+                if attr_name in method_names:
+                    continue
+                method_names.add(attr_name)
+                parse_infos.append(parse_info)
+        return parse_infos
+
+    @classmethod
+    def _extract_parses(cls, parse_infos: List[FieldParseInfo], field_names: List[str]) -> Dict[str, List[Parse]]:
+        """Collect field annotations from bases in mro reverse order."""
+        parses: Dict[str, List[Parse]] = {}
+        for parse_info in parse_infos:
+            parse_info_fields = {field.name if isinstance(field, FieldInfo) else field for field in parse_info.fields}
+            if parse_info.regex:
+                matched = _regex_filter(field_names, parse_info_fields)
+            else:
+                matched = parse_info_fields
+
+            parse_ = parse_info.to_parse(cls)
+
+            for field in matched:
+                if field not in field_names:
+                    raise SchemaInitError(f"Parse {parse_.name} is assigned to a non-exsiting field '{field}'")
+                if field not in parses:
+                    parses[field] = []
+                parses[field].append(parse_)
+        return parses
 
 
 SchemaModel = DataFrameModel

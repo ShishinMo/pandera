@@ -13,6 +13,7 @@ from typing import (
 )
 
 from pandera.api.checks import Check
+from pandera.api.parses import Parse
 
 CheckArg = Union[Check, List[Check]]
 AnyCallable = Callable[..., Any]
@@ -127,3 +128,22 @@ class BaseCheckInfo:  # pylint:disable=too-few-public-methods
             return self.check_fn(model_cls, arg)
 
         return Check(_adapter, name=name, **self.check_kwargs)
+
+
+class BasicParseInfo:
+    """Captures extra information about a Parse."""
+
+    def __init__(self, parse_fn: AnyCallable, **parse_kwargs: Any) -> None:
+        self.parse_fn = parse_fn
+        self.parse_kwargs = parse_kwargs
+
+    def to_parse(self, model_cls: Type) -> Parse:
+        """Create a Parse from metadata"""
+        name = self.parse_kwargs.pop("name", None)
+        if not name:
+            name = getattr(self.parse_fn, "__name__", self.parse_fn.__class__.__name__)
+
+        def _adapter(arg: Any) -> Union[bool, Iterable[bool]]:
+            return self.parse_fn(model_cls, arg)
+
+        return Parse(_adapter, name=name, **self.parse_kwargs)
