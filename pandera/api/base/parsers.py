@@ -3,9 +3,14 @@
 import inspect
 from typing import (
     Any,
+    Dict,
     NamedTuple,
     Optional,
+    Tuple,
     Type,
+    TypeVar,
+    Union,
+    no_type_check,
 )
 
 from pandera.backends.base import BaseParserBackend
@@ -18,7 +23,31 @@ class ParserResult(NamedTuple):
     parsed_object: Any
 
 
-class BaseParser:
+_T = TypeVar("_T", bound="BaseParser")
+
+
+class MetaParser(type):
+    """Parser metaclass."""
+
+    BACKEND_REGISTRY: Dict[Tuple[Type, Type], Type[BaseParserBackend]] = {}
+    """Registry of parser backends implemented for specific data objects."""
+
+    # pylint: disable=line-too-long
+    # mypy has limited metaclass support so this doesn't pass typecheck
+    # see https://mypy.readthedocs.io/en/stable/metaclasses.html#gotchas-and-limitations-of-metaclass-support
+    # pylint: enable=line-too-long
+    @no_type_check
+    def __contains__(cls: Type[_T], item: Union[_T, str]) -> bool:
+        """Allow lookups for registered parsers."""
+        if isinstance(item, cls):
+            name = item.name
+            return hasattr(cls, name)
+
+        # assume item is str
+        return hasattr(cls, item)
+
+
+class BaseParser(metaclass=MetaParser):
     """Parser base class."""
 
     def __init__(self, name: Optional[str] = None):
